@@ -1,0 +1,7 @@
+# Configuración local de Claude Code y documentación de instrucciones
+.claude/
+CLAUDE.md
+
+# Caché de Python
+__pycache__/
+*.pyc
