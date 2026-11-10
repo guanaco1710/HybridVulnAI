@@ -5,3 +5,6 @@ CLAUDE.md
 # Caché de Python
 __pycache__/
 *.pyc
+
+# API keys
+.env

@@ -86,6 +86,10 @@ def _peticion(url: str, cuerpo: dict, timeout: int) -> dict:
                           "¿Está 'ollama serve' en marcha?") from None
 
 
+def mensaje_usuario(host: dict) -> str:
+    return "Resultados de nmap:\n" + json.dumps(_host_compacto(host), ensure_ascii=False, indent=1)
+
+
 def analizar_host(host: dict, modelo: str = MODELO_POR_DEFECTO,
                   url_base: str = URL_POR_DEFECTO, timeout: int = 600) -> dict:
     cuerpo = {
@@ -95,8 +99,7 @@ def analizar_host(host: dict, modelo: str = MODELO_POR_DEFECTO,
         "options": {"temperature": 0.1},
         "messages": [
             {"role": "system", "content": PROMPT_SISTEMA},
-            {"role": "user", "content": "Resultados de nmap:\n"
-                                        + json.dumps(_host_compacto(host), ensure_ascii=False, indent=1)},
+            {"role": "user", "content": mensaje_usuario(host)},
         ],
     }
     respuesta = _peticion(url_base.rstrip("/") + "/api/chat", cuerpo, timeout)

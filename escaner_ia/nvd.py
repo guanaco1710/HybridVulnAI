@@ -2,7 +2,7 @@
 
 Solo se envían los IDs de CVE, nunca datos de la red escaneada.
 Sin API key NVD permite ~5 peticiones cada 30 s, por eso se espera entre consultas.
-Con la variable de entorno NVD_API_KEY el límite es mucho mayor.
+Con NVD_API_KEY (en el .env) el límite es mucho mayor.
 """
 
 import json
@@ -15,8 +15,8 @@ import urllib.request
 URL_NVD = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 
-def verificar_cves(ids: set[str]) -> dict[str, dict]:
-    clave = os.environ.get("NVD_API_KEY")
+def verificar_cves(ids: set[str], env: dict | None = None) -> dict[str, dict]:
+    clave = (os.environ if env is None else env).get("NVD_API_KEY")
     pausa = 0.7 if clave else 6.5
     resultados = {}
     for i, cve in enumerate(sorted(ids)):
