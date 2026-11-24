@@ -29,6 +29,18 @@ def analizar_con_ollama(hosts: list[dict], args) -> dict[str, dict]:
     return analisis
 
 
+def nuclei_disponible(args) -> bool:
+    """Nuclei va activo por defecto; si no está instalado se avisa y se sigue sin él."""
+    if args.sin_nuclei:
+        return False
+    try:
+        nuclei.binario()
+    except nuclei.ErrorNuclei as e:
+        print(f"[*] nuclei no disponible, se omite: {e}", file=sys.stderr)
+        return False
+    return True
+
+
 def ejecutar_nuclei(datos: dict, perfil: str, timeout: int, permitir_externos: bool) -> None:
     """Añade host["nuclei"] (lista de hallazgos) a cada host. Si nuclei falla, avisa y sigue sin ellos."""
     print(f"[*] Escaneando con nuclei (perfil {perfil})...", file=sys.stderr)
@@ -96,10 +108,10 @@ def main(argv=None) -> int:
     ap.add_argument("--guardar-xml", metavar="FICHERO", help="guarda también el XML bruto de nmap")
     ap.add_argument("--verificar-cve", action="store_true",
                     help="comprueba en NVD que existen los CVE citados (envía solo los IDs)")
-    ap.add_argument("--nuclei", action="store_true",
-                    help="tras nmap, escanea con nuclei los puertos abiertos encontrados (más lento)")
-    ap.add_argument("--perfil-nuclei", choices=nuclei.PERFILES, default="estandar",
-                    help="perfil de nuclei (def.: estandar = severidad media, alta y crítica)")
+    ap.add_argument("--sin-nuclei", action="store_true",
+                    help="no ejecuta nuclei (por defecto se ejecuta tras nmap sobre los puertos abiertos)")
+    ap.add_argument("--perfil-nuclei", choices=nuclei.PERFILES, default="rapido",
+                    help="perfil de nuclei (def.: rapido = severidad alta y crítica)")
     ap.add_argument("--timeout-nuclei", type=int, default=3600, metavar="SEGUNDOS",
                     help="tiempo máximo de nuclei (def.: 3600). Tarda minutos por cada puerto abierto")
     ap.add_argument("--sin-pdf", action="store_true", help="no genera el PDF (solo el informe Markdown)")
@@ -112,16 +124,15 @@ def main(argv=None) -> int:
             print("[!] Hay objetivos fuera de la red local: asegúrate de tener autorización para escanearlos.",
                   file=sys.stderr)
         analizadores = [] if args.sin_ia else preparar_analizadores(args)
-        if args.nuclei:
-            nuclei.binario()  # falla antes de escanear si nuclei no está instalado
+        usar_nuclei = nuclei_disponible(args)
         print(f"[*] Escaneando {', '.join(objetivos)} (perfil {args.perfil})...", file=sys.stderr)
         xml = escanear(objetivos, args.perfil, args.so, permitir_externos=args.permitir_externos)
-    except (ObjetivoNoPermitido, ErrorEscaneo, nuclei.ErrorNuclei) as e:
+    except (ObjetivoNoPermitido, ErrorEscaneo) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
     # Con nuclei hay datos que merecen informe aunque no haya IA; sin él, solo se guarda el XML.
-    sin_analizadores = not args.sin_ia and not analizadores and not args.nuclei
+    sin_analizadores = not args.sin_ia and not analizadores and not usar_nuclei
     if args.guardar_xml or sin_analizadores:
         ruta_xml = Path(args.guardar_xml or Path(args.salida).with_suffix(".xml"))
         ruta_xml.write_text(xml, encoding="utf-8")
@@ -136,8 +147,8 @@ def main(argv=None) -> int:
             host["nombres"].insert(0, nombre)
     print(f"[*] {len(datos['hosts'])} host(s) activo(s).", file=sys.stderr)
 
-    datos["nuclei"] = args.perfil_nuclei if args.nuclei else None
-    if args.nuclei:
+    datos["nuclei"] = args.perfil_nuclei if usar_nuclei else None
+    if usar_nuclei:
         ejecutar_nuclei(datos, args.perfil_nuclei, args.timeout_nuclei, args.permitir_externos)
 
     analisis, usados = {}, set()
