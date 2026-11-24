@@ -1,7 +1,7 @@
 """Escaneo de vulnerabilidades con nuclei sobre los puertos abiertos que encontró nmap.
 
 Los objetivos nunca se aceptan del usuario: salen solo de los hosts descubiertos por nmap y se
-vuelven a validar (solo red local). Perfiles cerrados, sin opciones libres.
+vuelven a validar con la política de objetivos (red local, o externos solo con permiso explícito). Perfiles cerrados, sin opciones libres.
 """
 
 import ipaddress
@@ -50,16 +50,16 @@ def binario() -> str:
     return ruta
 
 
-def objetivos_de_hosts(hosts: list[dict]) -> list[str]:
-    """`ip:puerto` de los puertos abiertos descubiertos por nmap, revalidados (solo red local)."""
+def objetivos_de_hosts(hosts: list[dict], permitir_externos: bool = False) -> list[str]:
+    """`ip:puerto` de los puertos abiertos descubiertos por nmap, revalidados con la política de objetivos."""
     objetivos = []
     for host in hosts:
         if not host["puertos"]:
             continue
         try:
-            ip = validar_objetivo(host["ip"])
+            ip = validar_objetivo(host["ip"], permitir_externos)
         except ObjetivoNoPermitido:
-            continue  # defensa en profundidad: nunca se pasa a nuclei algo fuera de la red local
+            continue  # defensa en profundidad: nunca se pasa a nuclei algo que la política no permita
         if "/" in ip:
             continue  # solo IPs sueltas, nunca rangos
         base = f"[{ip}]" if ipaddress.ip_address(ip).version == 6 else ip
@@ -133,9 +133,10 @@ def parsear_jsonl(texto: str, ips_permitidas: set[str]) -> dict[str, list[dict]]
     return resultado
 
 
-def escanear(hosts: list[dict], perfil: str = "estandar", timeout: int = 3600) -> dict[str, list[dict]]:
+def escanear(hosts: list[dict], perfil: str = "estandar", timeout: int = 3600,
+             permitir_externos: bool = False) -> dict[str, list[dict]]:
     """Ejecuta nuclei contra los puertos abiertos de `hosts`. Devuelve {ip: hallazgos}."""
-    objetivos = objetivos_de_hosts(hosts)
+    objetivos = objetivos_de_hosts(hosts, permitir_externos)
     if not objetivos:
         return {}
     ips = {o.rsplit(":", 1)[0].strip("[]") for o in objetivos}
