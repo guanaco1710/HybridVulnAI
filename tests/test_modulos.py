@@ -42,6 +42,20 @@ class TestObjetivosVacios(unittest.TestCase):
 
 
 class TestEscaner(unittest.TestCase):
+    def test_una_ip_publica_solo_llega_a_nmap_con_el_permiso(self):
+        with mock.patch.object(escaner.shutil, "which", return_value="/usr/bin/nmap"):
+            with self.assertRaises(objetivos.ObjetivoNoPermitido):
+                escaner.construir_comando(["8.8.8.8"], "rapido")
+            cmd = escaner.construir_comando(["8.8.8.8"], "rapido", permitir_externos=True)
+        self.assertEqual(cmd[-2:], ["--", "8.8.8.8"])
+
+    def test_escanear_propaga_el_permiso(self):
+        with mock.patch.object(escaner.shutil, "which", return_value="/usr/bin/nmap"), \
+                mock.patch.object(escaner.subprocess, "run",
+                                  return_value=mock.Mock(returncode=0, stdout="<x/>", stderr="")) as run:
+            escaner.escanear(["8.8.8.8"], "rapido", permitir_externos=True)
+        self.assertEqual(run.call_args.args[0][-1], "8.8.8.8")
+
     def test_perfil_desconocido(self):
         with self.assertRaises(escaner.ErrorEscaneo):
             escaner.construir_comando(["192.168.1.1"], "inventado")

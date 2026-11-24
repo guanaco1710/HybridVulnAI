@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from escaner_ia import __main__ as cli
-from escaner_ia import nvd, ollama, pdf, proveedores
+from escaner_ia import nvd, objetivos, ollama, pdf, proveedores
 from escaner_ia.escaner import ErrorEscaneo
 from escaner_ia.informe import generar_informe, generar_informe_html
 from tests.test_escaner_ia import XML
@@ -103,10 +103,40 @@ class TestCli(unittest.TestCase):
     def informe(self) -> str:
         return (self.dir / "informe.md").read_text()
 
-    def test_objetivo_publico_se_rechaza(self):
+    def test_objetivo_publico_se_rechaza_sin_el_flag(self):
         rc, err = self.main(objetivo="8.8.8.8")
         self.assertEqual(rc, 1)
         self.assertIn("Error:", err)
+        self.assertIn("--permitir-externos", err)
+        self.escanear.assert_not_called()
+
+    def test_ip_publica_con_el_flag_avisa_y_llega_a_nmap(self):
+        rc, err = self.main("--sin-ia", "--permitir-externos", objetivo="8.8.8.8")
+        self.assertEqual(rc, 0)
+        self.assertIn("fuera de la red local: asegúrate de tener autorización", err)
+        self.assertEqual(self.escanear.call_args.args[0], ["8.8.8.8"])
+        self.assertTrue(self.escanear.call_args.kwargs["permitir_externos"])
+
+    def test_la_red_local_no_avisa_ni_necesita_el_flag(self):
+        rc, err = self.main("--sin-ia")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("autorización", err)
+        self.assertFalse(self.escanear.call_args.kwargs["permitir_externos"])
+
+    def test_nombre_de_host_se_resuelve_y_se_escanea_la_ip_no_el_nombre(self):
+        falso = lambda nombre, puerto, type=0: [(2, type, 0, "", ("192.168.1.5", 0))]  # noqa: E731
+        with mock.patch.object(objetivos.socket, "getaddrinfo", side_effect=falso):
+            rc, _ = self.main("--sin-ia", objetivo="Router.Lab")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.escanear.call_args.args[0], ["192.168.1.5"])  # nunca el nombre
+        self.assertIn("## Host 192.168.1.5 (router.lab)", self.informe())
+
+    def test_nombre_que_resuelve_a_ip_publica_exige_el_flag(self):
+        falso = lambda nombre, puerto, type=0: [(2, type, 0, "", ("93.184.216.34", 0))]  # noqa: E731
+        with mock.patch.object(objetivos.socket, "getaddrinfo", side_effect=falso):
+            rc, err = self.main("--sin-ia", objetivo="example.com")
+        self.assertEqual(rc, 1)
+        self.assertIn("--permitir-externos", err)
         self.escanear.assert_not_called()
 
     def test_error_de_nmap(self):

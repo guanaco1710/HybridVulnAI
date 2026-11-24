@@ -18,14 +18,16 @@ class ErrorEscaneo(RuntimeError):
     pass
 
 
-def construir_comando(objetivos: list[str], perfil: str, detectar_so: bool = False) -> list[str]:
+def construir_comando(objetivos: list[str], perfil: str, detectar_so: bool = False,
+                      permitir_externos: bool = False) -> list[str]:
     if perfil not in PERFILES:
         raise ErrorEscaneo(f"perfil desconocido: {perfil}")
     nmap = shutil.which("nmap")
     if nmap is None:
         raise ErrorEscaneo("nmap no está instalado o no está en el PATH")
 
-    objetivos = validar_objetivos(objetivos)  # se valida aquí también, por si acaso
+    # Se revalida aquí también, por si acaso. Aquí ya solo llegan IPs/CIDR (los nombres se resolvieron antes).
+    objetivos = validar_objetivos(objetivos, permitir_externos)
     comando = [nmap, *PERFILES[perfil]]
     if detectar_so:
         comando.append("-O")
@@ -35,12 +37,12 @@ def construir_comando(objetivos: list[str], perfil: str, detectar_so: bool = Fal
 
 
 def escanear(objetivos: list[str], perfil: str = "vulners", detectar_so: bool = False,
-             timeout: int = 3600) -> str:
+             timeout: int = 3600, permitir_externos: bool = False) -> str:
     """Lanza nmap y devuelve su salida XML."""
     if detectar_so and os.geteuid() != 0:
         raise ErrorEscaneo("la detección de SO (-O) requiere ejecutar como root")
 
-    comando = construir_comando(objetivos, perfil, detectar_so)
+    comando = construir_comando(objetivos, perfil, detectar_so, permitir_externos)
     try:
         resultado = subprocess.run(comando, capture_output=True, text=True,
                                    timeout=timeout, check=False)

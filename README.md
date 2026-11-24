@@ -1,8 +1,8 @@
 # hybridVuln AI
 
-**hybridVuln AI** es un escáner de red local que combina **nmap** con una **IA online (Anthropic, OpenAI, Gemini o Groq)** o un **modelo local (Ollama)**. Escanea tus equipos, analiza los resultados en busca de CVE, vulnerabilidades y malas configuraciones, y genera un informe en Markdown con recomendaciones.
+**hybridVuln AI** es un escáner de red que combina **nmap** con una **IA online (Anthropic, OpenAI, Gemini o Groq)** o un **modelo local (Ollama)**. Escanea tus equipos, analiza los resultados en busca de CVE, vulnerabilidades y malas configuraciones, y genera un informe en Markdown con recomendaciones.
 
-> ⚠️ **Uso responsable:** escanea solo redes propias o con autorización expresa. El script lo refuerza: solo acepta la red local (RFC1918 y loopback) y rechaza cualquier IP pública.
+> ⚠️ **Uso responsable:** escanea solo redes y sistemas propios o con autorización expresa; escanear los de terceros sin permiso es ilegal. El script lo refuerza: la red local (RFC1918 y loopback) se escanea sin más, pero las **IPs públicas y los nombres de host exigen `--permitir-externos`**, con el que declaras que tienes autorización.
 
 ## Cómo funciona (paso a paso)
 
@@ -11,13 +11,17 @@ objetivos ─► validación ─► nmap (XML) ─► parseo ─► nuclei (opci
 ```
 
 1. **Validación de objetivos** ([objetivos.py](escaner_ia/objetivos.py)).
-   Cada objetivo debe ser una IP o un rango CIDR dentro de `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8` o `::1`. Se rechazan IPs públicas, `0.0.0.0/0`, nombres de host (podrían resolver a una IP pública), rangos con guion, rangos mayores que un /16 y cualquier valor que empiece por `-` (inyección de opciones).
+   Cada objetivo puede ser una IP, un rango CIDR o un nombre de host.
+   - **Red local** (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `::1`): siempre permitida, hasta un /16.
+   - **IPs públicas y nombres de host**: solo con `--permitir-externos`. Una IP pública suelta o un rango IPv4 de hasta /24.
+   - **Nombres de host**: se resuelven una sola vez y se escanean las **IPs resultantes**, nunca el nombre, para que nmap y nuclei no puedan volver a resolverlo y acabar en otra dirección (DNS rebinding). Cada IP resuelta pasa la misma política; el nombre aparece en el informe. Un nombre con más de 8 IPs se rechaza (indica las IPs concretas).
+   - **Nunca, ni con el flag:** direcciones no enrutables (link-local como `169.254.169.254` de los metadatos cloud, multicast, reservadas, documentación, CGNAT), rangos que mezclan local y público, rangos con guion y cualquier valor que empiece por `-` (inyección de opciones).
 2. **Escaneo con nmap** ([escaner.py](escaner_ia/escaner.py)).
    Se lanza `nmap` sin shell, con una lista de argumentos y un perfil cerrado (no se pasan opciones libres). La salida se pide en XML (`-oX -`) y los objetivos van tras `--`.
 3. **Parseo** ([parser.py](escaner_ia/parser.py)).
    El XML se convierte en diccionarios: hosts activos, puertos abiertos, servicio, producto, versión, CPE, salida de scripts NSE y los CVE que estos reporten (por ejemplo `vulners`).
 4. **Escaneo con nuclei (opcional, `--nuclei`)** ([nuclei.py](escaner_ia/nuclei.py)).
-   Nuclei prueba plantillas de vulnerabilidades conocidas contra los `ip:puerto` abiertos que encontró nmap. Los objetivos **nunca** los elige el usuario: salen solo de los hosts descubiertos por nmap y se **revalidan** (solo red local; cualquier IP pública se descarta). Se lanza sin shell, con perfiles cerrados y estas opciones fijas de seguridad: sin servidor OAST externo (`-ni`), sin comprobar ni descargar actualizaciones durante el escaneo (`-duc`), solo plantillas firmadas (`-dut`), sin plantillas `dos`, `fuzz`, `intrusive` ni `bruteforce`, y limitado a 50 peticiones/s. Los resultados se leen en JSONL y se filtran a las IPs escaneadas.
+   Nuclei prueba plantillas de vulnerabilidades conocidas contra los `ip:puerto` abiertos que encontró nmap. Los objetivos **nunca** los elige el usuario: salen solo de los hosts descubiertos por nmap y se **revalidan** con la misma política (una IP pública solo pasa con `--permitir-externos`; lo no enrutable se descarta siempre). Se lanza sin shell, con perfiles cerrados y estas opciones fijas de seguridad: sin servidor OAST externo (`-ni`), sin comprobar ni descargar actualizaciones durante el escaneo (`-duc`), solo plantillas firmadas (`-dut`), sin plantillas `dos`, `fuzz`, `intrusive` ni `bruteforce`, y limitado a 50 peticiones/s. Los resultados se leen en JSONL y se filtran a las IPs escaneadas.
 5. **Análisis con IA** ([proveedores.py](escaner_ia/proveedores.py), [ollama.py](escaner_ia/ollama.py)).
    - **IA online:** una **única petición** con el XML de nmap de todos los hosts (solo hosts con puertos abiertos, sin puertos cerrados ni datos de ruido, y con las salidas de scripts recortadas). La IA devuelve el análisis de todos los hosts en JSON con un esquema fijo (resumen + hallazgos con severidad, CVE, descripción y recomendación). Solo si el XML es muy grande (>24 000 caracteres, unos 6 000 tokens) se divide en lotes de hosts, para respetar los límites de tokens por minuto de las cuentas gratuitas. Si una petición falla (por ejemplo, límite de cuota), no se reintenta y se pasa a Ollama.
    - **Ollama:** al ser local y sin cuota, se analiza host a host.
@@ -90,6 +94,9 @@ python3 -m escaner_ia 192.168.1.10 192.168.1.20 --verificar-cve --modelo qwen2.5
 python3 -m escaner_ia 192.168.1.0/24 --nuclei
 python3 -m escaner_ia 192.168.1.0/24 --nuclei --perfil-nuclei rapido
 
+# IPs públicas y nombres de host: solo con --permitir-externos y si tienes autorización
+python3 -m escaner_ia mi-servidor.ejemplo.com 203.0.113.10 --permitir-externos
+
 # Con una IA online (si hay una API key en el .env, se usa en vez de Ollama)
 python3 -m escaner_ia 192.168.1.0/24 --proveedor anthropic
 
@@ -106,7 +113,8 @@ El informe se guarda en `informe.md` y `informe.pdf` (cámbialo con `--salida`; 
 
 | Opción | Descripción |
 |---|---|
-| `objetivos` | Una o más IPs o rangos CIDR de la red local. |
+| `objetivos` | Una o más IPs, rangos CIDR o nombres de host. La red local siempre; IPs públicas y nombres de host solo con `--permitir-externos`. |
+| `--permitir-externos` | Permite escanear IPs públicas y nombres de host. **Úsalo solo si tienes autorización** para escanear esos sistemas. |
 | `--perfil {rapido,estandar,vulners}` | Perfil de escaneo (por defecto `vulners`). |
 | `--so` | Detecta el sistema operativo (`-O`). Requiere root. |
 | `--modelo NOMBRE` | Modelo de Ollama (por defecto `llama3.1:8b`). |
@@ -163,14 +171,15 @@ Todos excluyen las plantillas `dos`, `fuzz`, `intrusive` y `bruteforce`. Aun as�
   - *«anthropic/openai/gemini/groq respondió 401/403»*: la API key es inválida; se usa Ollama como respaldo.
   - *«el modelo … no está descargado»*: ejecuta `ollama pull <modelo>`.
   - *«la detección de SO (-O) requiere ejecutar como root»*: usa `sudo`.
-  - *«fuera de la red local permitida»*: el objetivo no es una IP privada o de loopback.
+  - *«es una IP pública. Usa --permitir-externos…»*: el objetivo (o el nombre de host, al resolverse) no es de la red local; añade el flag solo si tienes autorización.
+  - *«no es una IP pública ni de la red local»*: direcciones no enrutables (link-local, multicast, CGNAT…); no se escanean nunca.
 
 ## Estructura
 
 ```
 escaner_ia/
 ├── __main__.py   # CLI y orquestación del pipeline
-├── objetivos.py  # validación de objetivos (solo red local)
+├── objetivos.py  # validación y resolución de objetivos (red local, externos con permiso)
 ├── escaner.py    # ejecución segura de nmap
 ├── parser.py     # XML de nmap -> datos normalizados
 ├── ollama.py     # prompt, llamada a Ollama y clasificación de CVE

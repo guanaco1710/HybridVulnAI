@@ -48,6 +48,13 @@ class TestObjetivos(unittest.TestCase):
         for ip in ("8.8.8.8", "1.1.1.1", "desconocida", "10.0.0.0/24", "-sS", "scanme.nmap.org"):
             self.assertEqual(nuclei.objetivos_de_hosts([host(ip)]), [], msg=ip)
 
+    def test_ip_publica_solo_con_el_permiso_y_lo_no_enrutable_nunca(self):
+        self.assertEqual(nuclei.objetivos_de_hosts([host("8.8.8.8", (443,))]), [])
+        self.assertEqual(nuclei.objetivos_de_hosts([host("8.8.8.8", (443,))], permitir_externos=True),
+                         ["8.8.8.8:443"])
+        for ip in ("169.254.169.254", "224.0.0.1", "100.64.0.1"):
+            self.assertEqual(nuclei.objetivos_de_hosts([host(ip)], permitir_externos=True), [], msg=ip)
+
     def test_una_ip_publica_no_contamina_a_las_privadas(self):
         self.assertEqual(nuclei.objetivos_de_hosts([host("8.8.8.8"), host("10.0.0.7", (443,))]),
                          ["10.0.0.7:443"])
@@ -160,7 +167,7 @@ class TestParseo(unittest.TestCase):
 
 
 class TestEscanear(unittest.TestCase):
-    def ejecutar(self, hosts=None, **resultado):
+    def ejecutar(self, hosts=None, permitir_externos=False, **resultado):
         usados = {}
 
         def falso(comando, **kw):
@@ -173,7 +180,7 @@ class TestEscanear(unittest.TestCase):
         with mock.patch.object(nuclei.shutil, "which", return_value="/usr/bin/nuclei"), \
                 mock.patch.object(nuclei.subprocess, "run", side_effect=falso):
             try:
-                return nuclei.escanear(hosts or [host()], "rapido"), usados
+                return nuclei.escanear(hosts or [host()], "rapido", permitir_externos=permitir_externos), usados
             finally:
                 self.assertFalse(os.path.exists(usados["ruta"]), "el fichero temporal debe borrarse")
 
@@ -187,6 +194,13 @@ class TestEscanear(unittest.TestCase):
         self.assertEqual(r["192.168.1.5"][0]["id"], "CVE-2023-1234")
         self.assertEqual(usados["contenido"], "192.168.1.5:22\n192.168.1.5:80\n")
         self.assertFalse(usados["kw"].get("shell", False))
+
+    def test_escanear_con_ips_publicas_propaga_el_permiso(self):
+        salida = linea(ip="8.8.8.8", host="8.8.8.8:443")
+        r, usados = self.ejecutar([host("8.8.8.8", (443,))], return_value=mock.Mock(returncode=0, stdout=salida, stderr=""),
+                                  permitir_externos=True)
+        self.assertEqual(usados["contenido"], "8.8.8.8:443\n")
+        self.assertIn("8.8.8.8", r)
 
     def test_ipv6_filtra_por_la_ip_sin_corchetes(self):
         salida = linea(ip="::1", host="[::1]:80")
@@ -353,6 +367,11 @@ class TestCliNuclei(unittest.TestCase):
         self.assertIn("perfil `estandar`", self.informe())
         self.assertIn("1 hallazgo(s)", err)
         self.assertEqual(self.escanear_nuclei.call_args.args[1], "estandar")
+        self.assertFalse(self.escanear_nuclei.call_args.args[3])  # sin --permitir-externos
+
+    def test_nuclei_recibe_el_permiso_de_externos(self):
+        self.main("--nuclei", "--permitir-externos")
+        self.assertTrue(self.escanear_nuclei.call_args.args[3])
 
     def test_perfil_nuclei(self):
         self.main("--nuclei", "--perfil-nuclei", "completo")

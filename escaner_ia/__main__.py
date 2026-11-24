@@ -8,7 +8,7 @@ from pathlib import Path
 from . import nuclei, nvd, ollama, pdf, proveedores
 from .escaner import PERFILES, ErrorEscaneo, escanear
 from .informe import generar_informe, generar_informe_html
-from .objetivos import ObjetivoNoPermitido, validar_objetivos
+from .objetivos import ObjetivoNoPermitido, es_local, resolver_objetivos
 from .parser import parsear_xml
 
 
@@ -29,11 +29,11 @@ def analizar_con_ollama(hosts: list[dict], args) -> dict[str, dict]:
     return analisis
 
 
-def ejecutar_nuclei(datos: dict, perfil: str, timeout: int) -> None:
+def ejecutar_nuclei(datos: dict, perfil: str, timeout: int, permitir_externos: bool) -> None:
     """Añade host["nuclei"] (lista de hallazgos) a cada host. Si nuclei falla, avisa y sigue sin ellos."""
     print(f"[*] Escaneando con nuclei (perfil {perfil})...", file=sys.stderr)
     try:
-        hallazgos = nuclei.escanear(datos["hosts"], perfil, timeout)
+        hallazgos = nuclei.escanear(datos["hosts"], perfil, timeout, permitir_externos)
     except nuclei.ErrorNuclei as e:
         print(f"    aviso: {e}", file=sys.stderr)
         if e.parciales is None:
@@ -77,7 +77,12 @@ def main(argv=None) -> int:
         description="hybridVuln AI: escanea la red local con nmap y analiza el resultado con una IA online "
                     "(si hay API key en el .env) o con un modelo de Ollama. "
                     "Sin ninguna de las dos, solo guarda el XML de nmap.")
-    ap.add_argument("objetivos", nargs="+", help="IPs o rangos CIDR de la red local (RFC1918/loopback)")
+    ap.add_argument("objetivos", nargs="+",
+                    help="IPs, rangos CIDR o nombres de host. La red local (RFC1918/loopback) siempre; "
+                         "IPs públicas y nombres de host solo con --permitir-externos")
+    ap.add_argument("--permitir-externos", action="store_true",
+                    help="permite escanear IPs públicas y nombres de host. Úsalo SOLO si tienes autorización "
+                         "para escanear esos sistemas")
     ap.add_argument("--perfil", choices=PERFILES, default="vulners", help="perfil de escaneo (def.: vulners)")
     ap.add_argument("--so", action="store_true", help="detectar sistema operativo (-O, requiere root)")
     ap.add_argument("--modelo", default=ollama.MODELO_POR_DEFECTO, help="modelo de Ollama")
@@ -102,12 +107,15 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        objetivos = validar_objetivos(args.objetivos)
+        objetivos, nombres = resolver_objetivos(args.objetivos, args.permitir_externos)
+        if any(not es_local(o) for o in objetivos):
+            print("[!] Hay objetivos fuera de la red local: asegúrate de tener autorización para escanearlos.",
+                  file=sys.stderr)
         analizadores = [] if args.sin_ia else preparar_analizadores(args)
         if args.nuclei:
             nuclei.binario()  # falla antes de escanear si nuclei no está instalado
         print(f"[*] Escaneando {', '.join(objetivos)} (perfil {args.perfil})...", file=sys.stderr)
-        xml = escanear(objetivos, args.perfil, args.so)
+        xml = escanear(objetivos, args.perfil, args.so, permitir_externos=args.permitir_externos)
     except (ObjetivoNoPermitido, ErrorEscaneo, nuclei.ErrorNuclei) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -122,11 +130,15 @@ def main(argv=None) -> int:
         print("[*] Sin IA online ni Ollama: solo se guarda el XML (sin informe).", file=sys.stderr)
         return 0
     datos = parsear_xml(xml)
+    for host in datos["hosts"]:  # los nombres de host solicitados se muestran en el informe
+        nombre = nombres.get(host["ip"])
+        if nombre and nombre not in host["nombres"]:
+            host["nombres"].insert(0, nombre)
     print(f"[*] {len(datos['hosts'])} host(s) activo(s).", file=sys.stderr)
 
     datos["nuclei"] = args.perfil_nuclei if args.nuclei else None
     if args.nuclei:
-        ejecutar_nuclei(datos, args.perfil_nuclei, args.timeout_nuclei)
+        ejecutar_nuclei(datos, args.perfil_nuclei, args.timeout_nuclei, args.permitir_externos)
 
     analisis, usados = {}, set()
     pendientes = [h for h in datos["hosts"] if h["puertos"]]
