@@ -7,7 +7,7 @@
 ## Cómo funciona (paso a paso)
 
 ```
-objetivos ─► validación ─► nmap (XML) ─► parseo ─► nuclei (opcional) ─► IA (online/Ollama) ─► clasificación de CVE ─► (NVD) ─► informe.md
+objetivos ─► validación ─► nmap (XML) ─► parseo ─► nuclei ─► IA (online/Ollama) ─► clasificación de CVE ─► (NVD) ─► informe.md
 ```
 
 1. **Validación de objetivos** ([objetivos.py](escaner_ia/objetivos.py)).
@@ -20,7 +20,7 @@ objetivos ─► validación ─► nmap (XML) ─► parseo ─► nuclei (opci
    Se lanza `nmap` sin shell, con una lista de argumentos y un perfil cerrado (no se pasan opciones libres). La salida se pide en XML (`-oX -`) y los objetivos van tras `--`.
 3. **Parseo** ([parser.py](escaner_ia/parser.py)).
    El XML se convierte en diccionarios: hosts activos, puertos abiertos, servicio, producto, versión, CPE, salida de scripts NSE y los CVE que estos reporten (por ejemplo `vulners`).
-4. **Escaneo con nuclei (opcional, `--nuclei`)** ([nuclei.py](escaner_ia/nuclei.py)).
+4. **Escaneo con nuclei (activo por defecto; `--sin-nuclei` lo desactiva)** ([nuclei.py](escaner_ia/nuclei.py)).
    Nuclei prueba plantillas de vulnerabilidades conocidas contra los `ip:puerto` abiertos que encontró nmap. Los objetivos **nunca** los elige el usuario: salen solo de los hosts descubiertos por nmap y se **revalidan** con la misma política (una IP pública solo pasa con `--permitir-externos`; lo no enrutable se descarta siempre). Se lanza sin shell, con perfiles cerrados y estas opciones fijas de seguridad: sin servidor OAST externo (`-ni`), sin comprobar ni descargar actualizaciones durante el escaneo (`-duc`), solo plantillas firmadas (`-dut`), sin plantillas `dos`, `fuzz`, `intrusive` ni `bruteforce`, y limitado a 50 peticiones/s. Los resultados se leen en JSONL y se filtran a las IPs escaneadas.
 5. **Análisis con IA** ([proveedores.py](escaner_ia/proveedores.py), [ollama.py](escaner_ia/ollama.py)).
    - **IA online:** una **única petición** con el XML de nmap de todos los hosts (solo hosts con puertos abiertos, sin puertos cerrados ni datos de ruido, y con las salidas de scripts recortadas). La IA devuelve el análisis de todos los hosts en JSON con un esquema fijo (resumen + hallazgos con severidad, CVE, descripción y recomendación). Solo si el XML es muy grande (>24 000 caracteres, unos 6 000 tokens) se divide en lotes de hosts, para respetar los límites de tokens por minuto de las cuentas gratuitas. Si una petición falla (por ejemplo, límite de cuota), no se reintenta y se pasa a Ollama.
@@ -31,7 +31,7 @@ objetivos ─► validación ─► nmap (XML) ─► parseo ─► nuclei (opci
 7. **Verificación opcional en NVD** ([nvd.py](escaner_ia/nvd.py)), con `--verificar-cve`.
    Se consulta cada CVE en la API de NVD para confirmar que existe. Solo se envían los IDs, nunca datos de tu red.
 8. **Informe** ([informe.py](escaner_ia/informe.py), [pdf.py](escaner_ia/pdf.py)).
-   Con `--nuclei` incluye una tabla de vulnerabilidades por host. Se genera en Markdown y también en **PDF** (mismo nombre con extensión `.pdf`, con colores por severidad). La IA solo devuelve texto estructurado; el PDF lo maqueta el script con WeasyPrint a partir de ese análisis, tanto si lo hizo una IA online como Ollama.
+   Incluye una tabla de vulnerabilidades por host. Se genera en Markdown y también en **PDF** (mismo nombre con extensión `.pdf`, con colores por severidad). La IA solo devuelve texto estructurado; el PDF lo maqueta el script con WeasyPrint a partir de ese análisis, tanto si lo hizo una IA online como Ollama.
    Se genera un Markdown por host con dos secciones separadas: *Datos de nmap* (hechos del escaneo) y *Hallazgos del análisis de IA* (inferencias), ordenados por severidad.
 
 ## Requisitos
@@ -40,7 +40,7 @@ objetivos ─► validación ─► nmap (XML) ─► parseo ─► nuclei (opci
 - **nmap** instalado (`sudo apt install nmap`).
 - El script NSE **vulners** (incluido en las instalaciones habituales de nmap) para el perfil por defecto.
 - **WeasyPrint** para el PDF (`sudo apt install python3-weasyprint`). Opcional: sin él se genera solo el Markdown y se avisa.
-- **nuclei** (solo para `--nuclei`) con sus plantillas descargadas: tras instalarlo, ejecuta **una vez** `nuclei -ut`. El escaneo no descarga nada por su cuenta (`-duc`); actualiza las plantillas tú, cuando quieras, con ese mismo comando.
+- **nuclei** con sus plantillas descargadas (se ejecuta por defecto; si no está instalado se avisa y se escanea sin él): tras instalarlo, ejecuta **una vez** `nuclei -ut`. El escaneo no descarga nada por su cuenta (`-duc`); actualiza las plantillas tú, cuando quieras, con ese mismo comando.
 - Al menos una IA: una **API key** de un proveedor online o **Ollama** en marcha con un modelo descargado. Sin ninguna, solo se guarda el XML de nmap.
 
 ## Instalación y preparación de Ollama
@@ -91,8 +91,9 @@ python3 -m escaner_ia 192.168.1.0/24
 python3 -m escaner_ia 192.168.1.10 192.168.1.20 --verificar-cve --modelo qwen2.5:14b
 
 # Además, escanea con nuclei los puertos abiertos que encuentre nmap
-python3 -m escaner_ia 192.168.1.0/24 --nuclei
-python3 -m escaner_ia 192.168.1.0/24 --nuclei --perfil-nuclei rapido
+python3 -m escaner_ia 192.168.1.0/24                           # nmap + nuclei (perfil rapido)
+python3 -m escaner_ia 192.168.1.0/24 --perfil-nuclei estandar  # otro perfil de nuclei
+python3 -m escaner_ia 192.168.1.0/24 --sin-nuclei              # solo nmap
 
 # IPs públicas y nombres de host: solo con --permitir-externos y si tienes autorización
 python3 -m escaner_ia mi-servidor.ejemplo.com 203.0.113.10 --permitir-externos
@@ -125,8 +126,8 @@ El informe se guarda en `informe.md` y `informe.pdf` (cámbialo con `--salida`; 
 | `--salida FICHERO` | Fichero del informe (por defecto `informe.md`). |
 | `--guardar-xml FICHERO` | Guarda también el XML bruto de nmap. |
 | `--verificar-cve` | Comprueba en NVD que existen los CVE citados. |
-| `--nuclei` | Tras nmap, escanea con nuclei los puertos abiertos encontrados (más lento). Sin IA disponible genera igualmente el informe. |
-| `--perfil-nuclei {rapido,estandar,completo}` | Perfil de nuclei (por defecto `estandar`). |
+| `--sin-nuclei` | No ejecuta nuclei (por defecto se ejecuta tras nmap sobre los puertos abiertos). Sin nuclei ni IA solo se guarda el XML. |
+| `--perfil-nuclei {rapido,estandar,completo}` | Perfil de nuclei (por defecto `rapido`). |
 | `--timeout-nuclei SEGUNDOS` | Tiempo máximo de nuclei (por defecto 3600). Si se agota, se conserva lo encontrado y el informe lo marca como **incompleto**. |
 | `--sin-pdf` | No genera el PDF (solo el Markdown). |
 | `--sin-ia` | No llama a ninguna IA; escanea y genera el informe solo con datos de nmap. |
@@ -143,8 +144,8 @@ El informe se guarda en `informe.md` y `informe.pdf` (cámbialo con `--salida`; 
 
 | Perfil | Severidades | Para qué |
 |---|---|---|
-| `rapido` | alta, crítica | Lo más grave, en poco tiempo. |
-| `estandar` | media, alta, crítica | Equilibrio entre cobertura y duración (por defecto). |
+| `rapido` | alta, crítica | Lo más grave, en poco tiempo (por defecto). |
+| `estandar` | media, alta, crítica | Más cobertura, el doble de lento. |
 | `completo` | info, baja, media, alta, crítica | Todo, incluidas detecciones informativas; es el más lento y ruidoso. |
 
 **Duración (medida con nuclei 3.11 y plantillas v10.5, a 50 peticiones/s, por cada puerto abierto):** `rapido` ≈ 2,7 min (4 444 plantillas), `estandar` ≈ 4,5 min (7 224) y `completo` ≈ 8 min. Crece con el número de puertos abiertos: una red con decenas de puertos puede tardar horas, así que sube `--timeout-nuclei` (también en el cron) o usa `rapido`. Si el tiempo se agota, el informe conserva lo encontrado y avisa de que está incompleto, pero lo ya detectado puede ser poco: nuclei no emite los hallazgos en orden.
@@ -184,7 +185,7 @@ escaner_ia/
 ├── parser.py     # XML de nmap -> datos normalizados
 ├── ollama.py     # prompt, llamada a Ollama y clasificación de CVE
 ├── proveedores.py # IA online (Anthropic, OpenAI, Gemini, Groq) por API key
-├── nuclei.py     # escaneo opcional con nuclei sobre los puertos abiertos
+├── nuclei.py     # escaneo con nuclei sobre los puertos abiertos
 ├── nvd.py        # verificación opcional de CVE en NVD
 ├── informe.py    # generación del informe (Markdown y HTML)
 └── pdf.py        # HTML -> PDF con WeasyPrint

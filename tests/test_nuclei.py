@@ -353,45 +353,73 @@ class TestCliNuclei(unittest.TestCase):
     def informe(self):
         return (self.dir / "informe.md").read_text()
 
-    def test_por_defecto_no_se_usa_nuclei(self):
-        self.main("--sin-ia")
+    def test_por_defecto_se_usa_nuclei_con_perfil_rapido(self):
+        rc, _ = self.main("--sin-ia")
+        self.assertEqual(rc, 0)
+        self.escanear_nuclei.assert_called_once()
+        self.assertEqual(self.escanear_nuclei.call_args.args[1], "rapido")
+        self.assertIn("perfil `rapido`", self.informe())
+        self.assertIn("Vuln nuclei", self.informe())
+
+    def test_sin_nuclei_lo_desactiva_y_ni_lo_busca(self):
+        self.main("--sin-ia", "--sin-nuclei")
+        self.binario.assert_not_called()
         self.escanear_nuclei.assert_not_called()
         self.assertNotIn("nuclei", self.informe().lower())
 
+    def test_sin_nuclei_y_sin_ia_solo_guarda_el_xml(self):
+        rc, err = self.main("--sin-nuclei")
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.dir / "informe.xml").exists())
+        self.assertFalse((self.dir / "informe.md").exists())
+
+    def test_nuclei_no_instalado_avisa_y_sigue_sin_el(self):
+        self.binario.side_effect = nuclei.ErrorNuclei("nuclei no está instalado")
+        rc, err = self.main("--sin-ia")
+        self.assertEqual(rc, 0)
+        self.assertIn("nuclei no disponible, se omite", err)
+        self.escanear_nuclei.assert_not_called()
+        self.assertNotIn("nuclei", self.informe().lower())
+
+    def test_nuclei_no_instalado_y_sin_ia_solo_guarda_el_xml(self):
+        self.binario.side_effect = nuclei.ErrorNuclei("nuclei no está instalado")
+        rc, _ = self.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.dir / "informe.xml").exists())
+        self.assertFalse((self.dir / "informe.md").exists())
+
+    def test_la_opcion_antigua_nuclei_ya_no_existe(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["192.168.1.5", "--nuclei"])
+
     def test_con_nuclei_aparece_en_el_informe_aunque_no_haya_ia(self):
-        rc, err = self.main("--nuclei")
+        rc, err = self.main()
         self.assertEqual(rc, 0)
         self.assertTrue((self.dir / "informe.md").exists())  # sin IA pero con nuclei: hay informe
         self.assertFalse((self.dir / "informe.xml").exists())
         self.assertIn("Vuln nuclei", self.informe())
-        self.assertIn("perfil `estandar`", self.informe())
+        self.assertIn("perfil `rapido`", self.informe())
         self.assertIn("1 hallazgo(s)", err)
-        self.assertEqual(self.escanear_nuclei.call_args.args[1], "estandar")
+        self.assertEqual(self.escanear_nuclei.call_args.args[1], "rapido")
         self.assertFalse(self.escanear_nuclei.call_args.args[3])  # sin --permitir-externos
 
     def test_nuclei_recibe_el_permiso_de_externos(self):
-        self.main("--nuclei", "--permitir-externos")
+        self.main("--permitir-externos")
         self.assertTrue(self.escanear_nuclei.call_args.args[3])
 
     def test_perfil_nuclei(self):
-        self.main("--nuclei", "--perfil-nuclei", "completo")
+        self.main("--perfil-nuclei", "completo")
         self.assertEqual(self.escanear_nuclei.call_args.args[1], "completo")
         self.assertIn("perfil `completo`", self.informe())
 
     def test_los_cve_de_nuclei_se_verifican_en_nvd(self):
-        self.main("--nuclei", "--verificar-cve")
+        self.main("--verificar-cve")
         self.assertIn("CVE-2099-0007", self.verificar.call_args.args[0])
-
-    def test_nuclei_ausente_falla_antes_de_escanear(self):
-        self.binario.side_effect = nuclei.ErrorNuclei("nuclei no está instalado")
-        rc, err = self.main("--nuclei")
-        self.assertEqual(rc, 1)
-        self.assertIn("nuclei no está instalado", err)
-        cli.escanear.assert_not_called()
 
     def test_si_nuclei_falla_avisa_y_no_afirma_que_no_hay_vulnerabilidades(self):
         self.escanear_nuclei.side_effect = nuclei.ErrorNuclei("plantillas sin descargar")
-        rc, err = self.main("--nuclei")
+        rc, err = self.main()
         self.assertEqual(rc, 0)
         self.assertIn("aviso: plantillas sin descargar", err)
         self.assertNotIn("Sin vulnerabilidades detectadas por nuclei", self.informe())
@@ -399,19 +427,19 @@ class TestCliNuclei(unittest.TestCase):
 
     def test_timeout_de_nuclei_conserva_lo_encontrado_y_marca_el_informe_incompleto(self):
         self.escanear_nuclei.side_effect = nuclei.ErrorNuclei("tiempo límite", self.hallazgos)
-        rc, err = self.main("--nuclei", "--timeout-nuclei", "5")
+        rc, err = self.main("--timeout-nuclei", "5")
         self.assertEqual(rc, 0)
         self.assertEqual(self.escanear_nuclei.call_args.args[2], 5)
         self.assertIn("Vuln nuclei", self.informe())  # lo conseguido no se pierde
         self.assertIn("**INCOMPLETO**", self.informe())
 
     def test_timeout_por_defecto_una_hora(self):
-        self.main("--nuclei")
+        self.main()
         self.assertEqual(self.escanear_nuclei.call_args.args[2], 3600)
 
     def test_host_sin_hallazgos_de_nuclei_queda_con_lista_vacia(self):
         self.escanear_nuclei.return_value = {}
-        self.main("--nuclei")
+        self.main()
         self.assertIn("Sin vulnerabilidades detectadas por nuclei", self.informe())
 
 

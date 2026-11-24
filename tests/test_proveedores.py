@@ -315,7 +315,7 @@ class TestCadenaDeRespaldo(unittest.TestCase):
                 mock.patch.object(proveedores, "analizar_red", side_effect=online), \
                 contextlib.redirect_stderr(io.StringIO()):
             salida = Path(d) / "informe.md"
-            rc = cli.main(["192.168.1.5", "--salida", str(salida), "--env", str(Path(d) / ".env")])
+            rc = cli.main(["192.168.1.5", "--salida", str(salida), "--env", str(Path(d) / ".env"), "--sin-nuclei"])
             return rc, salida.exists(), salida.with_suffix(".xml").exists(), \
                 salida.read_text() if salida.exists() else ""
 

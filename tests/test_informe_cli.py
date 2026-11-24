@@ -92,9 +92,12 @@ class TestCli(unittest.TestCase):
         self.guardar_pdf = mock.patch.object(pdf, "guardar_pdf").start()
 
     def main(self, *args, env=None, objetivo="192.168.1.5"):
-        """Ejecuta cli.main sin tocar el .env real ni el entorno. Devuelve (código, stderr)."""
+        """Ejecuta cli.main sin tocar el .env real ni el entorno. Devuelve (código, stderr).
+
+        Nuclei va activo por defecto: aquí se desactiva (los tests de nuclei están en test_nuclei.py).
+        """
         argv = [objetivo, "--salida", str(self.dir / "informe.md"),
-                "--env", str(self.dir / "no-existe.env"), *args]
+                "--env", str(self.dir / "no-existe.env"), "--sin-nuclei", *args]
         with mock.patch.dict(os.environ, env or {}, clear=True), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
             rc = cli.main(argv)
@@ -197,10 +200,10 @@ class TestCli(unittest.TestCase):
         (self.dir / "e.env").write_text("API_KEY_IA=sk-k\nMODELO_IA=del-env\n")
         argv = ["--env", str(self.dir / "e.env")]
         with mock.patch.dict(os.environ, {}, clear=True), contextlib.redirect_stderr(io.StringIO()):
-            cli.main(["192.168.1.5", "--salida", str(self.dir / "informe.md"), *argv])
+            cli.main(["192.168.1.5", "--salida", str(self.dir / "informe.md"), "--sin-nuclei", *argv])
         self.assertIn("openai:del-env", self.informe())
         with mock.patch.dict(os.environ, {}, clear=True), contextlib.redirect_stderr(io.StringIO()):
-            cli.main(["192.168.1.5", "--salida", str(self.dir / "informe.md"), *argv,
+            cli.main(["192.168.1.5", "--salida", str(self.dir / "informe.md"), "--sin-nuclei", *argv,
                       "--modelo-online", "del-cli"])
         self.assertIn("openai:del-cli", self.informe())
 

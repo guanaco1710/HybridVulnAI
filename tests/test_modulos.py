@@ -35,6 +35,14 @@ def error_http(caso, codigo=500, cuerpo=b"detalle"):
     return e
 
 
+class TestProteccionDeTests(unittest.TestCase):
+    def test_los_tests_no_pueden_lanzar_procesos_reales(self):
+        """tests/__init__.py bloquea subprocess.run: así un test sin simular no escanea de verdad."""
+        with self.assertRaises(AssertionError) as cm:
+            subprocess.run(["nuclei", "-list", "x"])
+        self.assertIn("proceso real", str(cm.exception))
+
+
 class TestObjetivosVacios(unittest.TestCase):
     def test_sin_objetivos(self):
         with self.assertRaises(objetivos.ObjetivoNoPermitido):
