@@ -98,7 +98,7 @@ def detectar(nombre: str | None = None, env: dict | None = None) -> tuple[str, s
 
 def _peticion(prov: str, url: str, cabeceras: dict, cuerpo: dict, timeout: int) -> dict:
     req = urllib.request.Request(url, data=json.dumps(cuerpo).encode(),
-                                 headers={"Content-Type": "application/json", "User-Agent": "escaner_ia/1.0", **cabeceras})
+                                 headers={"Content-Type": "application/json", "User-Agent": "hybridVulnAI/1.0", **cabeceras})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.load(resp)

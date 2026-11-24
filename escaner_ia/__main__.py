@@ -1,4 +1,4 @@
-"""CLI: python -m escaner_ia 192.168.1.0/24"""
+"""CLI de hybridVuln AI: python -m escaner_ia 192.168.1.0/24"""
 
 import argparse
 import os
@@ -57,7 +57,7 @@ def preparar_analizadores(args) -> list:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="escaner_ia",
-        description="Escanea la red local con nmap y analiza el resultado con una IA online "
+        description="hybridVuln AI: escanea la red local con nmap y analiza el resultado con una IA online "
                     "(si hay API key en el .env) o con un modelo de Ollama. "
                     "Sin ninguna de las dos, solo guarda el XML de nmap.")
     ap.add_argument("objetivos", nargs="+", help="IPs o rangos CIDR de la red local (RFC1918/loopback)")

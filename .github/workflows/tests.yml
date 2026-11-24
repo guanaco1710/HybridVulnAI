@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar nmap (lo exigen los tests del escáner)
+        run: sudo apt-get update && sudo apt-get install -y nmap
+      - name: Instalar WeasyPrint (para el test del PDF)
+        run: pip install weasyprint
+      - name: Ejecutar tests
+        run: python -m unittest discover -s tests -t . -v
