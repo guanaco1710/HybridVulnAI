@@ -4,6 +4,7 @@ import json
 import os
 import urllib.error
 import sys
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -16,7 +17,8 @@ RUTA_ENV = Path(__file__).resolve().parent.parent / ".env"
 PROVEEDORES = {
     "anthropic": {"modelo": "claude-haiku-5-5"},
     "openai": {"modelo": "gpt-4o-mini"},
-    "gemini": {"modelo": "gemini-2.5-flash"},
+    # Alias "latest": sigue al modelo vigente y no queda obsoleto (gemini-2.5-flash ya da 404 a cuentas nuevas).
+    "gemini": {"modelo": "gemini-flash-latest"},
     "groq": {"modelo": "openai/gpt-oss-120b"},
 }
 
@@ -96,16 +98,28 @@ def detectar(nombre: str | None = None, env: dict | None = None) -> tuple[str, s
     return prov, clave
 
 
+# Errores de servidor que suelen ser picos de demanda ("503 high demand"): se reintenta con espera.
+# El 429 (cuota agotada) no se reintenta: reintentar no lo arregla y gasta más cuota.
+CODIGOS_TEMPORALES = (502, 503, 504)
+ESPERAS_REINTENTO = (2, 5)  # segundos antes de cada reintento
+
+
 def _peticion(prov: str, url: str, cabeceras: dict, cuerpo: dict, timeout: int) -> dict:
     req = urllib.request.Request(url, data=json.dumps(cuerpo).encode(),
                                  headers={"Content-Type": "application/json", "User-Agent": "hybridVulnAI/1.0", **cabeceras})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.load(resp)
-    except urllib.error.HTTPError as e:
-        raise ErrorOnline(f"{prov} respondió {e.code}: {e.read().decode(errors='replace')[:300]}") from None
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise ErrorOnline(f"no se pudo conectar con {prov} ({e})") from None
+    reintento = 0
+    while True:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            if e.code in CODIGOS_TEMPORALES and reintento < len(ESPERAS_REINTENTO):
+                time.sleep(ESPERAS_REINTENTO[reintento])
+                reintento += 1
+                continue
+            raise ErrorOnline(f"{prov} respondió {e.code}: {e.read().decode(errors='replace')[:300]}") from None
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise ErrorOnline(f"no se pudo conectar con {prov} ({e})") from None
 
 
 def _texto_anthropic(modelo: str, clave: str, sistema: str, usuario: str, timeout: int) -> str:

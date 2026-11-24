@@ -168,6 +168,33 @@ class TestPeticionHttp(unittest.TestCase):
                 self.peticion()
         self.assertIn("groq respondió 429: cuota", str(cm.exception))
 
+    def test_reintenta_los_errores_temporales_con_espera(self):
+        respuestas = [error_http(self, 503), error_http(self, 504), RespuestaFalsa({"ok": True})]
+        with mock.patch.object(proveedores.urllib.request, "urlopen", side_effect=respuestas) as uo, \
+                mock.patch.object(proveedores.time, "sleep") as sleep:
+            self.assertEqual(self.peticion(), {"ok": True})
+        self.assertEqual(uo.call_count, 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [2, 5])
+
+    def test_si_el_503_persiste_se_rinde_tras_los_reintentos(self):
+        respuestas = [error_http(self, 503) for _ in range(3)]
+        with mock.patch.object(proveedores.urllib.request, "urlopen", side_effect=respuestas) as uo, \
+                mock.patch.object(proveedores.time, "sleep"):
+            with self.assertRaises(proveedores.ErrorOnline) as cm:
+                self.peticion()
+        self.assertEqual(uo.call_count, 3)  # 1 intento + 2 reintentos
+        self.assertIn("503", str(cm.exception))
+
+    def test_cuota_y_errores_permanentes_no_se_reintentan(self):
+        for codigo in (400, 401, 404, 429, 500):
+            with mock.patch.object(proveedores.urllib.request, "urlopen",
+                                   side_effect=error_http(self, codigo)) as uo, \
+                    mock.patch.object(proveedores.time, "sleep") as sleep:
+                with self.assertRaises(proveedores.ErrorOnline):
+                    self.peticion()
+            self.assertEqual(uo.call_count, 1, msg=codigo)
+            sleep.assert_not_called()
+
     def test_sin_conexion(self):
         for fallo in (urllib.error.URLError("x"), TimeoutError()):
             with mock.patch.object(proveedores.urllib.request, "urlopen", side_effect=fallo):
