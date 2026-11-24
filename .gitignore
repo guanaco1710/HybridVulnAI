@@ -15,3 +15,8 @@ __pycache__/
 # Cobertura
 .coverage
 htmlcov/
+
+# Informes generados (contienen datos de la red)
+informe*.md
+informe*.pdf
+informe*.xml

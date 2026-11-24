@@ -59,7 +59,7 @@ Antes de escanear se decide qué IA usar, por orden:
    |---|---|
    | `API_KEY_IA` | Tu API key (la de cualquier proveedor soportado). |
    | `PROVEEDOR_IA` | `anthropic`, `openai`, `gemini` o `groq`. Opcional: si se omite se deduce del prefijo de la clave (`sk-ant-` → anthropic, `AIza` → gemini, `gsk_` → groq, `sk-` → openai). Si no se puede deducir, defínelo. |
-   | `MODELO_IA` | Modelo a usar. Opcional; por defecto `claude-haiku-5-5`, `gpt-4o-mini`, `gemini-2.5-flash` o `openai/gpt-oss-120b` según el proveedor. |
+   | `MODELO_IA` | Modelo a usar. Opcional; por defecto `claude-haiku-5-5`, `gpt-4o-mini`, `gemini-flash-latest` o `openai/gpt-oss-120b` según el proveedor. Los errores 502/503/504 del proveedor (picos de demanda) se reintentan hasta 2 veces con espera; el 429 (cuota) no. |
 
    En línea de comandos, `--proveedor` y `--modelo-online` tienen prioridad sobre el `.env`.
 2. **Ollama**, si no hay API key o si la IA online falla en un host (error de red, clave inválida, respuesta no válida).
