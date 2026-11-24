@@ -3,6 +3,7 @@ import io
 import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -12,6 +13,7 @@ from escaner_ia.informe import generar_informe_html
 from escaner_ia.ollama import clasificar_origen
 from escaner_ia.parser import parsear_xml
 from tests.test_escaner_ia import XML
+from tests.test_modulos import RespuestaFalsa, error_http
 
 RESPUESTA_RED = '{"hosts": [{"ip": "192.168.1.5", "resumen": "ok", "hallazgos": [{"puerto": 22, "titulo": "SSH", "cves": ["CVE-2099-0001"]}]}]}'
 RESPUESTA = '{"resumen": "ok", "hallazgos": [{"puerto": 22, "titulo": "SSH", "cves": ["CVE-2099-0001"]}]}'
@@ -139,6 +141,100 @@ class TestPeticiones(unittest.TestCase):
             "gemini", {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]})
         self.assertEqual(cab["x-goog-api-key"], "CLAVE")
         self.assertNotIn("CLAVE", url)
+
+
+class TestDeteccionSinEnv(unittest.TestCase):
+    def test_sin_argumento_mezcla_entorno_y_env(self):
+        with mock.patch.dict(os.environ, {"API_KEY_IA": "sk-del_entorno"}, clear=True), \
+                mock.patch.object(proveedores, "leer_env", return_value={"PROVEEDOR_IA": "gemini"}):
+            self.assertEqual(proveedores.detectar(), ("gemini", "sk-del_entorno"))
+
+
+class TestPeticionHttp(unittest.TestCase):
+    def peticion(self):
+        return proveedores._peticion("groq", "https://x", {"X-Test": "1"}, {"a": 1}, 5)
+
+    def test_ok_envia_user_propio_y_cabeceras(self):
+        with mock.patch.object(proveedores.urllib.request, "urlopen",
+                               return_value=RespuestaFalsa({"ok": True})) as uo:
+            self.assertEqual(self.peticion(), {"ok": True})
+        req = uo.call_args.args[0]
+        self.assertEqual(req.headers["User-agent"], "hybridVulnAI/1.0")
+        self.assertEqual(req.headers["X-test"], "1")
+
+    def test_http_error_incluye_proveedor_y_codigo(self):
+        with mock.patch.object(proveedores.urllib.request, "urlopen", side_effect=error_http(self, 429, b"cuota")):
+            with self.assertRaises(proveedores.ErrorOnline) as cm:
+                self.peticion()
+        self.assertIn("groq respondió 429: cuota", str(cm.exception))
+
+    def test_sin_conexion(self):
+        for fallo in (urllib.error.URLError("x"), TimeoutError()):
+            with mock.patch.object(proveedores.urllib.request, "urlopen", side_effect=fallo):
+                with self.assertRaises(proveedores.ErrorOnline):
+                    self.peticion()
+
+
+class TestXmlPodadoCasos(unittest.TestCase):
+    XML_RUIDO = """<nmaprun>
+<host><status state="up"/><address addr="10.0.0.1" addrtype="ipv4"/>
+<ports><extraports state="closed" count="99"/>
+<port protocol="tcp" portid="22"><state state="open"/><service name="ssh"/>
+<script id="s" output="salida"><elem key="k">v</elem><table key="t"/></script></port>
+<port protocol="tcp" portid="23"/></ports><times srtt="1"/><distance value="1"/></host>
+<host><status state="up"/><address addr="10.0.0.2" addrtype="ipv4"/>
+<ports><port protocol="tcp" portid="80"><state state="closed"/></port></ports></host>
+<host><status state="up"/><address addr="10.0.0.3" addrtype="ipv4"/></host>
+</nmaprun>"""
+
+    def test_poda_ruido_hijos_de_scripts_y_hosts_sin_puertos_abiertos(self):
+        hosts = proveedores.hosts_podados(self.XML_RUIDO)
+        self.assertEqual([ip for ip, _ in hosts], ["10.0.0.1"])  # 10.0.0.2 y .3 no tienen puertos abiertos
+        texto = hosts[0][1]
+        for ruido in ("extraports", "times", "distance", "<elem", "<table", 'portid="23"'):
+            self.assertNotIn(ruido, texto)
+        self.assertIn('output="salida"', texto)
+
+    def test_ip_desconocida_si_no_hay_direccion(self):
+        xml = XML.replace('<address addr="192.168.1.5" addrtype="ipv4"/>', "")
+        self.assertEqual(proveedores.hosts_podados(xml)[0][0], "desconocida")
+
+
+class TestAnalizarRedFallos(unittest.TestCase):
+    def analizar(self, llamada):
+        with mock.patch.dict(proveedores._LLAMADAS, {"openai": llamada}), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            r = proveedores.analizar_red(XML, parsear_xml(XML)["hosts"], "openai", "m", "k")
+        return r, err.getvalue()
+
+    def test_respuesta_con_estructura_inesperada(self):
+        for excepcion in (KeyError("candidates"), IndexError(), TypeError()):
+            def llamada(*a, _e=excepcion):
+                raise _e
+            r, err = self.analizar(llamada)
+            self.assertEqual(r, {})
+            self.assertIn("respuesta inesperada de openai", err)
+
+    def test_entradas_de_host_que_no_son_objetos_se_ignoran(self):
+        r, _ = self.analizar(lambda *a: '{"hosts": ["texto", {"sin_ip": 1}]}')
+        self.assertEqual(r, {})
+
+    def test_fallo_en_un_lote_corta_los_siguientes(self):
+        llamadas = []
+
+        def llamada(*a):
+            llamadas.append(1)
+            raise proveedores.ErrorOnline("429")
+        with mock.patch.object(proveedores, "MAX_CHARS_LOTE", 1), \
+                mock.patch.dict(proveedores._LLAMADAS, {"openai": llamada}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            xml2 = XML.replace("</nmaprun>", XML.split("<nmaprun")[1].split("<host>")[1]
+                               .split("</host>")[0].join(["<host>", "</host>"])
+                               .replace("192.168.1.5", "192.168.1.6") + "</nmaprun>")
+            hosts = parsear_xml(xml2)["hosts"]
+            self.assertGreaterEqual(len(hosts), 2)
+            proveedores.analizar_red(xml2, hosts, "openai", "m", "k")
+        self.assertEqual(len(llamadas), 1)  # no se insiste con el segundo lote
 
 
 class TestPdf(unittest.TestCase):
