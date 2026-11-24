@@ -1,6 +1,6 @@
-# escaner_ia
+# hybridVuln AI
 
-Escáner de red local que combina **nmap** con una **IA online (Anthropic, OpenAI, Gemini o Groq)** o un **modelo local (Ollama)**. Escanea tus equipos, analiza los resultados en busca de CVE, vulnerabilidades y malas configuraciones, y genera un informe en Markdown con recomendaciones.
+**hybridVuln AI** es un escáner de red local que combina **nmap** con una **IA online (Anthropic, OpenAI, Gemini o Groq)** o un **modelo local (Ollama)**. Escanea tus equipos, analiza los resultados en busca de CVE, vulnerabilidades y malas configuraciones, y genera un informe en Markdown con recomendaciones.
 
 > ⚠️ **Uso responsable:** escanea solo redes propias o con autorización expresa. El script lo refuerza: solo acepta la red local (RFC1918 y loopback) y rechaza cualquier IP pública.
 

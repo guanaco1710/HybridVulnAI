@@ -11,6 +11,7 @@ def generar_informe(datos: dict, analisis: dict[str, dict], verificacion: dict[s
     L = []
     L.append("# Informe de seguridad de red")
     L.append("")
+    L.append("- Generado por: hybridVuln AI")
     L.append(f"- Fecha: {datetime.now():%Y-%m-%d %H:%M}")
     L.append(f"- Comando nmap: `{datos['comando']}`")
     L.append(f"- Modelo de IA: `{modelo}`")
@@ -97,6 +98,7 @@ def generar_informe_html(datos: dict, analisis: dict[str, dict], verificacion: d
     e = lambda v: escape(str(v))  # noqa: E731
     H = []
     H.append("<h1>Informe de seguridad de red</h1><ul class='meta'>")
+    H.append("<li><b>Generado por:</b> hybridVuln AI</li>")
     H.append(f"<li><b>Fecha:</b> {datetime.now():%Y-%m-%d %H:%M}</li>")
     H.append(f"<li><b>Comando nmap:</b> <code>{e(datos['comando'])}</code></li>")
     H.append(f"<li><b>Modelo de IA:</b> <code>{e(modelo)}</code></li>")
@@ -151,5 +153,5 @@ def generar_informe_html(datos: dict, analisis: dict[str, dict], verificacion: d
                     partes.append(e(txt + ")"))
                 H.append("<p><b>CVE:</b> " + "; ".join(partes) + "</p>")
             H.append(f"<p><b>Recomendación:</b> {e(h['recomendacion'])}</p></div>")
-    return ("<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Informe de seguridad de red"
+    return ("<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Informe de seguridad de red - hybridVuln AI"
             f"</title><style>{CSS}</style></head><body>" + "\n".join(H) + "</body></html>")
