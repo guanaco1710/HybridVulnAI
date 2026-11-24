@@ -220,6 +220,9 @@ def analizar_red(xml: str, hosts: list[dict], proveedor: str, modelo: str, clave
     analisis = {}
     for lote in _lotes(hosts_podados(xml)):
         usuario = "XML de nmap:\n" + "\n".join(texto for _, texto in lote)
+        nuclei = {ip: ollama.nuclei_compacto(por_ip[ip]) for ip, _ in lote if por_ip.get(ip, {}).get("nuclei")}
+        if nuclei:
+            usuario += "\n\nHallazgos de nuclei por host (confirmados):\n" + json.dumps(nuclei, ensure_ascii=False)
         try:
             analisis_lote = _extraer_json(_LLAMADAS[proveedor](modelo, clave, PROMPT_RED, usuario, timeout))
         except (KeyError, IndexError, TypeError):

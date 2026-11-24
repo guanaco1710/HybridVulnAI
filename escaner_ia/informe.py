@@ -6,6 +6,11 @@ from html import escape
 ORDEN = {"critica": 0, "alta": 1, "media": 2, "baja": 3, "info": 4}
 
 
+def _celda(valor) -> str:
+    """Texto seguro para una celda de tabla Markdown (viene de plantillas y banners)."""
+    return str(valor).replace("|", "\\|").replace("\n", " ")
+
+
 def generar_informe(datos: dict, analisis: dict[str, dict], verificacion: dict[str, dict] | None,
                     modelo: str) -> str:
     L = []
@@ -15,6 +20,9 @@ def generar_informe(datos: dict, analisis: dict[str, dict], verificacion: dict[s
     L.append(f"- Fecha: {datetime.now():%Y-%m-%d %H:%M}")
     L.append(f"- Comando nmap: `{datos['comando']}`")
     L.append(f"- Modelo de IA: `{modelo}`")
+    if datos.get("nuclei"):
+        incompleto = " (**INCOMPLETO**: se agotó el tiempo límite)" if datos.get("nuclei_incompleto") else ""
+        L.append(f"- Nuclei: perfil `{datos['nuclei']}`{incompleto}")
     L.append(f"- Hosts activos: {len(datos['hosts'])}")
     L.append("")
     L.append("> **Aviso:** los datos de la sección *Datos de nmap* proceden del escaneo. "
@@ -43,6 +51,22 @@ def generar_informe(datos: dict, analisis: dict[str, dict], verificacion: dict[s
         else:
             L.append("Sin puertos abiertos detectados.")
         L.append("")
+
+        if host.get("nuclei") is not None:
+            L.append("### Vulnerabilidades detectadas por nuclei")
+            L.append("")
+            if host["nuclei"]:
+                L.append("| Severidad | Plantilla | Puerto | CVE | Coincidencia |")
+                L.append("|---|---|---|---|---|")
+                for n in sorted(host["nuclei"], key=lambda n: ORDEN.get(n["severidad"], 9)):
+                    cves = ", ".join(n["cves"]) or "-"
+                    detalles = f": {_celda(', '.join(n['detalles']))}" if n["detalles"] else ""
+                    L.append(f"| {n['severidad'].upper()} | {_celda(n['nombre'])} (`{_celda(n['id'])}`){detalles} "
+                             f"| {n['puerto'] or '-'} | {cves} | {_celda(n['coincidencia'] or '-')} |")
+            else:
+                L.append("Sin vulnerabilidades detectadas por nuclei" + (
+                    " **en el tiempo disponible** (escaneo incompleto)." if datos.get("nuclei_incompleto") else "."))
+            L.append("")
 
         L.append("### Hallazgos del análisis de IA")
         L.append("")
@@ -102,6 +126,9 @@ def generar_informe_html(datos: dict, analisis: dict[str, dict], verificacion: d
     H.append(f"<li><b>Fecha:</b> {datetime.now():%Y-%m-%d %H:%M}</li>")
     H.append(f"<li><b>Comando nmap:</b> <code>{e(datos['comando'])}</code></li>")
     H.append(f"<li><b>Modelo de IA:</b> <code>{e(modelo)}</code></li>")
+    if datos.get("nuclei"):
+        incompleto = " (<b>INCOMPLETO</b>: se agotó el tiempo límite)" if datos.get("nuclei_incompleto") else ""
+        H.append(f"<li><b>Nuclei:</b> perfil <code>{e(datos['nuclei'])}</code>{incompleto}</li>")
     H.append(f"<li><b>Hosts activos:</b> {len(datos['hosts'])}</li></ul>")
     H.append("<p class='aviso'><b>Aviso:</b> los datos de la sección <i>Datos de nmap</i> proceden del "
              "escaneo. Los <i>Hallazgos del análisis de IA</i> son inferencias del modelo y pueden "
@@ -127,6 +154,20 @@ def generar_informe_html(datos: dict, analisis: dict[str, dict], verificacion: d
             H.append("</table>")
         else:
             H.append("<p>Sin puertos abiertos detectados.</p>")
+
+        if host.get("nuclei") is not None:
+            H.append("<h3>Vulnerabilidades detectadas por nuclei</h3>")
+            if host["nuclei"]:
+                H.append("<table><tr><th>Severidad</th><th>Plantilla</th><th>Puerto</th><th>CVE</th>"
+                         "<th>Coincidencia</th></tr>")
+                for n in sorted(host["nuclei"], key=lambda n: ORDEN.get(n["severidad"], 9)):
+                    H.append(f"<tr class='sev-{e(n['severidad'])}'><td><span class='etq'>{e(n['severidad'])}</span></td>"
+                             f"<td>{e(n['nombre'])} (<code>{e(n['id'])}</code>){e(': ' + ', '.join(n['detalles']) if n['detalles'] else '')}</td><td>{e(n['puerto'] or '-')}</td>"
+                             f"<td>{e(', '.join(n['cves']) or '-')}</td><td>{e(n['coincidencia'] or '-')}</td></tr>")
+                H.append("</table>")
+            else:
+                H.append("<p>Sin vulnerabilidades detectadas por nuclei" + (
+                    " <b>en el tiempo disponible</b> (escaneo incompleto)." if datos.get("nuclei_incompleto") else ".") + "</p>")
 
         H.append("<h3>Hallazgos del análisis de IA</h3>")
         a = analisis.get(ip)

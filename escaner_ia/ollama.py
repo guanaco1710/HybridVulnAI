@@ -47,12 +47,20 @@ no lo cites: describe el riesgo sin ID. Nunca inventes IDs.
 - Incluye malas configuraciones (servicios en claro como telnet/ftp/http sin TLS, \
 SMB/RDP/bases de datos expuestos, versiones obsoletas, métodos HTTP peligrosos, etc.).
 - Cada hallazgo lleva una recomendación concreta y accionable.
+- Los "nuclei" (si los hay) son detecciones activas ya confirmadas por plantillas: tenlos en \
+cuenta, priorízalos y no los repitas sin aportar contexto o una recomendación útil.
 - Usa puerto 0 para hallazgos que afectan al host completo.
 - Si no hay nada relevante, devuelve una lista vacía."""
 
 
 class ErrorOllama(RuntimeError):
     pass
+
+
+def nuclei_compacto(host: dict) -> list[dict]:
+    """Hallazgos de nuclei del host sin los campos que no ayudan al modelo."""
+    return [{k: h[k] for k in ("id", "nombre", "severidad", "puerto", "coincidencia", "descripcion",
+                               "cves", "cvss", "detalles")} for h in host.get("nuclei", [])]
 
 
 def _host_compacto(host: dict) -> dict:
@@ -69,6 +77,7 @@ def _host_compacto(host: dict) -> dict:
             | {"scripts": recortar(p["scripts"])}
             for p in host["puertos"]
         ],
+        "nuclei": nuclei_compacto(host),
     }
 
 
@@ -112,8 +121,9 @@ def analizar_host(host: dict, modelo: str = MODELO_POR_DEFECTO,
 
 
 def clasificar_origen(analisis: dict, host: dict) -> dict:
-    """Marca cada CVE como detectado por nmap o como inferencia de la IA."""
+    """Marca cada CVE como detectado por nmap, por nuclei o como inferencia de la IA."""
     cves_nmap = {c["id"] for p in host["puertos"] for c in p["cves_nmap"]}
+    cves_nuclei = {c for h in host.get("nuclei", []) for c in h["cves"]}
     for h in analisis.get("hallazgos", []):
         cves = []
         for cve in h.get("cves", []):
@@ -121,7 +131,8 @@ def clasificar_origen(analisis: dict, host: dict) -> dict:
             if not m:
                 continue  # descarta IDs con formato inválido
             cid = m.group(0).upper()
-            cves.append({"id": cid, "origen": "nmap" if cid in cves_nmap else "ia"})
+            origen = "nmap" if cid in cves_nmap else "nuclei" if cid in cves_nuclei else "ia"
+            cves.append({"id": cid, "origen": origen})
         h["cves"] = cves
     return analisis
 

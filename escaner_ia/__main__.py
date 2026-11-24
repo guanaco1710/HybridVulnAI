@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import nvd, ollama, pdf, proveedores
+from . import nuclei, nvd, ollama, pdf, proveedores
 from .escaner import PERFILES, ErrorEscaneo, escanear
 from .informe import generar_informe, generar_informe_html
 from .objetivos import ObjetivoNoPermitido, validar_objetivos
@@ -27,6 +27,23 @@ def analizar_con_ollama(hosts: list[dict], args) -> dict[str, dict]:
         except ollama.ErrorOllama as e:
             print(f"    aviso: {e}", file=sys.stderr)
     return analisis
+
+
+def ejecutar_nuclei(datos: dict, perfil: str, timeout: int) -> None:
+    """Añade host["nuclei"] (lista de hallazgos) a cada host. Si nuclei falla, avisa y sigue sin ellos."""
+    print(f"[*] Escaneando con nuclei (perfil {perfil})...", file=sys.stderr)
+    try:
+        hallazgos = nuclei.escanear(datos["hosts"], perfil, timeout)
+    except nuclei.ErrorNuclei as e:
+        print(f"    aviso: {e}", file=sys.stderr)
+        if e.parciales is None:
+            datos["nuclei"] = None  # no se afirma "sin vulnerabilidades" si el escaneo no se hizo
+            return
+        hallazgos = e.parciales
+        datos["nuclei_incompleto"] = True
+    for host in datos["hosts"]:
+        host["nuclei"] = hallazgos.get(host["ip"], [])
+    print(f"[*] nuclei: {sum(len(v) for v in hallazgos.values())} hallazgo(s).", file=sys.stderr)
 
 
 def preparar_analizadores(args) -> list:
@@ -74,6 +91,12 @@ def main(argv=None) -> int:
     ap.add_argument("--guardar-xml", metavar="FICHERO", help="guarda también el XML bruto de nmap")
     ap.add_argument("--verificar-cve", action="store_true",
                     help="comprueba en NVD que existen los CVE citados (envía solo los IDs)")
+    ap.add_argument("--nuclei", action="store_true",
+                    help="tras nmap, escanea con nuclei los puertos abiertos encontrados (más lento)")
+    ap.add_argument("--perfil-nuclei", choices=nuclei.PERFILES, default="estandar",
+                    help="perfil de nuclei (def.: estandar = severidad media, alta y crítica)")
+    ap.add_argument("--timeout-nuclei", type=int, default=3600, metavar="SEGUNDOS",
+                    help="tiempo máximo de nuclei (def.: 3600). Tarda minutos por cada puerto abierto")
     ap.add_argument("--sin-pdf", action="store_true", help="no genera el PDF (solo el informe Markdown)")
     ap.add_argument("--sin-ia", action="store_true", help="solo escanea, sin llamar a ninguna IA")
     args = ap.parse_args(argv)
@@ -81,13 +104,16 @@ def main(argv=None) -> int:
     try:
         objetivos = validar_objetivos(args.objetivos)
         analizadores = [] if args.sin_ia else preparar_analizadores(args)
+        if args.nuclei:
+            nuclei.binario()  # falla antes de escanear si nuclei no está instalado
         print(f"[*] Escaneando {', '.join(objetivos)} (perfil {args.perfil})...", file=sys.stderr)
         xml = escanear(objetivos, args.perfil, args.so)
-    except (ObjetivoNoPermitido, ErrorEscaneo) as e:
+    except (ObjetivoNoPermitido, ErrorEscaneo, nuclei.ErrorNuclei) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    sin_analizadores = not args.sin_ia and not analizadores
+    # Con nuclei hay datos que merecen informe aunque no haya IA; sin él, solo se guarda el XML.
+    sin_analizadores = not args.sin_ia and not analizadores and not args.nuclei
     if args.guardar_xml or sin_analizadores:
         ruta_xml = Path(args.guardar_xml or Path(args.salida).with_suffix(".xml"))
         ruta_xml.write_text(xml, encoding="utf-8")
@@ -97,6 +123,10 @@ def main(argv=None) -> int:
         return 0
     datos = parsear_xml(xml)
     print(f"[*] {len(datos['hosts'])} host(s) activo(s).", file=sys.stderr)
+
+    datos["nuclei"] = args.perfil_nuclei if args.nuclei else None
+    if args.nuclei:
+        ejecutar_nuclei(datos, args.perfil_nuclei, args.timeout_nuclei)
 
     analisis, usados = {}, set()
     pendientes = [h for h in datos["hosts"] if h["puertos"]]
@@ -115,6 +145,7 @@ def main(argv=None) -> int:
     if args.verificar_cve:
         ids = {c["id"] for a in analisis.values() for h in a["hallazgos"] for c in h["cves"]}
         ids |= {c["id"] for h in datos["hosts"] for p in h["puertos"] for c in p["cves_nmap"]}
+        ids |= {c for h in datos["hosts"] for n in h.get("nuclei", []) for c in n["cves"]}
         if ids:
             print(f"[*] Verificando {len(ids)} CVE en NVD...", file=sys.stderr)
             verificacion = nvd.verificar_cves(ids, cargar_env(args))
