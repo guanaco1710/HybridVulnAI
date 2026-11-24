@@ -18,7 +18,9 @@ jobs:
           python-version: "3.12"
       - name: Instalar nmap (lo exigen los tests del escáner)
         run: sudo apt-get update && sudo apt-get install -y nmap
-      - name: Instalar WeasyPrint (para el test del PDF)
-        run: pip install weasyprint
-      - name: Ejecutar tests
-        run: python -m unittest discover -s tests -t . -v
+      - name: Instalar WeasyPrint (test del PDF) y coverage
+        run: pip install weasyprint coverage
+      - name: Ejecutar tests con cobertura
+        run: coverage run -m unittest discover -s tests -t . -v
+      - name: Exigir 100% de cobertura (líneas y ramas)
+        run: coverage report

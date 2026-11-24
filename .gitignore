@@ -11,3 +11,7 @@ __pycache__/
 
 # Ficheros de intercambio de editores
 *.swp
+
+# Cobertura
+.coverage
+htmlcov/

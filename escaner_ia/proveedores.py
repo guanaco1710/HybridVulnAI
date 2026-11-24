@@ -32,7 +32,7 @@ CAMPOS_HALLAZGO = {"puerto": 0, "tipo": "vulnerabilidad", "titulo": "(sin títul
 # todos ellos. El lote se limita en caracteres (~4 caracteres por token) para no pasar los límites
 # de tokens por minuto de las cuentas gratuitas.
 MAX_CHARS_LOTE = 24000
-ETIQUETAS_RUIDO = ("extraports", "times", "uptime", "distance", "tcpsequence", "ipidsequence",
+ETIQUETAS_RUIDO = ("times", "uptime", "distance", "tcpsequence", "ipidsequence",
                    "tcptssequence", "trace")
 
 ESQUEMA_RED = {
@@ -154,8 +154,6 @@ def _extraer_json(texto: str) -> dict:
         analisis = json.loads(texto[ini:fin + 1])
     except json.JSONDecodeError:
         raise ErrorOnline(f"el modelo no devolvió JSON válido: {texto[:300]!r}") from None
-    if not isinstance(analisis, dict):
-        raise ErrorOnline(f"el modelo no devolvió un objeto JSON: {texto[:300]!r}")
     return analisis
 
 
@@ -181,6 +179,8 @@ def hosts_podados(xml: str) -> list[tuple[str, str]]:
         puertos = host.find("ports")
         if puertos is None:
             continue
+        for resumen in puertos.findall("extraports"):  # "98 puertos cerrados": no aporta al análisis
+            puertos.remove(resumen)
         for puerto in puertos.findall("port"):
             estado = puerto.find("state")
             if estado is None or estado.get("state") != "open":

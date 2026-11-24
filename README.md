@@ -163,3 +163,12 @@ docs/agentes.md   # subagentes de Claude Code del proyecto
 ```bash
 python3 -m unittest discover -s tests -t .
 ```
+
+El proyecto exige **100 % de cobertura** (líneas y ramas; configurado en `.coveragerc` con `fail_under = 100`). Para comprobarlo en local necesitas `coverage` (`sudo apt install python3-coverage`, o `pip install coverage` en un entorno virtual):
+
+```bash
+coverage run -m unittest discover -s tests -t .
+coverage report   # falla si la cobertura baja del 100 %
+```
+
+El CI de GitHub ejecuta lo mismo y `main` está protegida: un PR no se puede mergear si fallan los tests o baja la cobertura.
